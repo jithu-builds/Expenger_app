@@ -120,14 +120,11 @@ def logout() -> None:
 # ─── Form handlers ────────────────────────────────────────────────────────────
 
 def _go_to_dashboard() -> None:
-    """Close the dialog and go to dashboard by forcing a clean page reload."""
-    _stc.html(
-        """<script>
-        setTimeout(function() { window.parent.location.href = '/'; }, 150);
-        </script>""",
-        height=1,
-    )
-    st.stop()
+    """Close the dialog and go to dashboard natively."""
+    st.session_state.show_auth = False
+    st.session_state._auth_open = False
+    st.session_state.auth_mode = None
+    st.rerun()
 
 
 def _handle_sign_in(email: str, password: str) -> None:
