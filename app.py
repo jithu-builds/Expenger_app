@@ -1,590 +1,650 @@
 """
-Expenger — AI Expense Manager · Streamlit entry point.
+AI Insights page.
 
-Run with:
-    streamlit run app.py
+Layout order (most actionable → least):
+  1. 💡 Recommendations  ← moved to top
+  2. 📊 Spending Health Score
+  3. ⚠️ Budget Alerts
+  4. 📈 End-of-Month Predictions
+  5. 💬 AI Chat
 """
 
+import plotly.graph_objects as go
 import streamlit as st
-import extra_streamlit_components as stx
-from components.session_store import set_cm
 
-st.set_page_config(
-    page_title="Expenger",
-    page_icon="💸",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+from backend.ai_engine import answer_finance_question, generate_spending_insights
+from backend.supabase_client import fetch_budgets, fetch_transactions
 
-# Create CookieManager ONCE per render and register it in the shared store.
-set_cm(stx.CookieManager(key="expenger_cookies"))
+# ── Colour helpers ────────────────────────────────────────────────────────────
 
-# ─── Global CSS ───────────────────────────────────────────────────────────────
-GLOBAL_CSS = """
+SEVERITY_STYLE = {
+    "high":   ("🔴", "#ef4444", "rgba(239,68,68,0.1)"),
+    "medium": ("🟡", "#f59e0b", "rgba(245,158,11,0.1)"),
+    "low":    ("🟢", "#22c55e", "rgba(34,197,94,0.1)"),
+}
+
+CHAT_CSS = """
 <style>
-/*
- * Expenger design tokens
- * -----------------------------------------
- * bg-deep:      #1a1512  page background
- * bg-card:      #221c18  card / surface
- * bg-elevated:  #2c2318  raised / hover
- * accent-terra: #BD866A  primary (terracotta)
- * accent-gold:  #C9A860  numbers / highlights
- * accent-sage:  #7B9E87  positive / income
- * accent-sky:   #7AA0C4  contrast / links
- * accent-rose:  #C97B7B  over-budget / danger
- * cream-bright: #F4ECDC  headings
- * cream-mid:    #D4C4A8  body text
- * cream-muted:  #A89880  secondary
- * cream-dim:    #6B5C50  labels / disabled
- */
+/* ── AI Insights page extras ── */
+@keyframes ai-shimmer {
+    0%   { opacity: 0.5; }
+    50%  { opacity: 1;   }
+    100% { opacity: 0.5; }
+}
+.ai-loading-card {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    text-align: center;
+    background: #1a1512;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+}
+.ai-loading-steps {
+    display: flex; justify-content: center; align-items: center;
+    gap: 0.75rem; flex-wrap: wrap; margin-top: 1.5rem;
+}
+.ai-step-chip {
+    background: rgba(122,160,196,0.1);
+    border: 1px solid rgba(122,160,196,0.25);
+    border-radius: 99px; padding: 6px 16px;
+    font-size: 0.78rem; color: #7AA0C4; font-weight: 600;
+    animation: ai-shimmer 2s ease-in-out infinite;
+}
+.ai-step-chip:nth-child(2) { animation-delay: 0.4s; }
+.ai-step-chip:nth-child(3) { animation-delay: 0.8s; }
+.ai-step-chip:nth-child(4) { animation-delay: 1.2s; }
 
-/* ── Base ── */
-.stApp { background: #1a1512; }
-#MainMenu, footer { visibility: hidden; }
-header[data-testid="stHeader"] { background: transparent !important; }
-
-/* ── Sidebar ── */
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #1e1813 0%, #1a1512 100%) !important;
-    border-right: 1px solid rgba(244,236,220,0.07) !important;
-}
-[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
-[data-testid="stSidebar"] .stRadio label {
-    display: flex; align-items: center; justify-content: center;
-    padding: 0.75rem 1.1rem; border-radius: 12px;
-    color: #6B5C50 !important; font-weight: 600; font-size: 1.05rem;
-    cursor: pointer; transition: background 0.15s, color 0.15s;
-    margin-bottom: 4px; border-left: none; text-align: center; gap: 0;
-}
-[data-testid="stSidebar"] .stRadio label:hover {
-    background: rgba(201,168,96,0.1); color: #C9A860 !important;
-}
-[data-testid="stSidebar"] .stRadio label:has(input:checked) {
-    background: rgba(201,168,96,0.12) !important;
-    color: #C9A860 !important;
-    box-shadow: inset 0 0 0 1px rgba(201,168,96,0.3) !important;
-}
-[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] {
-    width: 100%; text-align: center;
-}
-[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p {
-    margin: 0; line-height: 1.3; text-align: center;
-}
-[data-testid="stSidebar"] .stRadio input[type="radio"] { display: none !important; }
-[data-testid="stSidebar"] .stRadio div[data-baseweb="radio"] { display: none !important; }
-[data-testid="stSidebar"] .stRadio label > div:first-child { display: none !important; }
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"],
-[data-testid="stSidebar"] .stRadio > label { display: none !important; }
-
-/* ── Lock sidebar width — hide drag handle + fix dimensions ── */
-[data-testid="stSidebarResizeHandle"],
-[data-testid="stSidebarResizeHandle"] > div,
-[data-testid="stSidebarResizeHandle"] * {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
-    overflow: hidden !important;
-    pointer-events: none !important;
-    cursor: default !important;
-}
-/* Force fixed width so browser never enters resize zone */
-[data-testid="stSidebar"] {
-    min-width: 280px !important;
-    max-width: 280px !important;
-    width: 280px !important;
-    cursor: default !important;
-}
-/* Neutralise any col-resize cursor on sidebar inner divs */
-[data-testid="stSidebar"] > div,
-[data-testid="stSidebarContent"],
-[data-testid="stSidebarUserContent"] {
-    cursor: default !important;
-}
-
-/* ── Content area ── */
-.block-container { padding: 1.75rem 2.5rem 2rem !important; max-width: 1400px; }
-
-/* ── Typography ── */
-h1 {
-    font-size: 1.75rem !important; font-weight: 800 !important;
-    color: #F4ECDC !important; letter-spacing: -0.5px !important;
-    margin-bottom: 0.25rem !important;
-}
-h2 { font-size: 1.2rem !important; font-weight: 700 !important; color: #D4C4A8 !important; }
-h3 { font-size: 1rem !important; font-weight: 600 !important; color: #A89880 !important; }
-
-/* ── Metric cards — gold value, cream label, subtle top accent ── */
-[data-testid="stMetric"] {
+/* ── Rec card — sky-blue left border, gold category tag ── */
+.rec-card {
     background: #221c18;
-    border: 1px solid rgba(244,236,220,0.08);
+    border: 1px solid rgba(122,160,196,0.15);
+    border-left: 3px solid #7AA0C4;
+    border-radius: 14px; padding: 1.1rem 1.25rem;
+    margin-bottom: 0.65rem;
+    display: flex; justify-content: space-between;
+    align-items: flex-start; gap: 1rem;
+}
+.rec-card-body { flex: 1; }
+.rec-card-title { font-weight: 700; color: #F4ECDC; margin-bottom: 4px; }
+.rec-card-detail { font-size: 0.875rem; color: #A89880; line-height: 1.55; }
+.rec-card-cat {
+    font-size: 0.72rem; color: #C9A860; margin-top: 6px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+}
+.rec-card-savings { text-align: center; min-width: 80px; }
+.rec-savings-label {
+    font-size: 0.65rem; color: #6B5C50; text-transform: uppercase;
+    letter-spacing: 0.1em; margin-bottom: 2px;
+}
+.rec-savings-value { font-size: 1.2rem; font-weight: 800; color: #7B9E87; }
+
+/* ── Chat section — gold top border ── */
+.chat-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 1.25rem 1.5rem;
+    background: linear-gradient(135deg, #221c18, #1e1813);
+    border: 1px solid rgba(244,236,220,0.07);
     border-top: 2px solid rgba(201,168,96,0.4);
-    border-radius: 16px; padding: 1.2rem 1.4rem !important;
-    transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+    border-bottom: none;
+    border-radius: 16px 16px 0 0;
 }
-[data-testid="stMetric"]:hover {
-    border-color: rgba(201,168,96,0.5);
-    border-top-color: #C9A860;
-    transform: translateY(-1px);
-    box-shadow: 0 8px 24px rgba(201,168,96,0.1);
-}
-[data-testid="stMetricLabel"] {
-    color: #6B5C50 !important; font-size: 0.75rem !important;
-    font-weight: 700 !important; text-transform: uppercase !important;
-    letter-spacing: 0.1em !important;
-}
-[data-testid="stMetricValue"] {
-    color: #C9A860 !important; font-size: 1.65rem !important;
-    font-weight: 800 !important; letter-spacing: -0.5px !important;
-}
-[data-testid="stMetricDelta"] { color: #7B9E87 !important; font-weight: 600 !important; }
-[data-testid="stMetricDelta"] svg { display: none; }
+.chat-header-icon { font-size: 1.5rem; line-height: 1; }
+.chat-header-title { font-size: 1rem; font-weight: 700; color: #F4ECDC; }
+.chat-header-sub { font-size: 0.78rem; color: #A89880; }
 
-/* ── Buttons ── */
-.stButton button, .stFormSubmitButton button {
-    background: linear-gradient(135deg, #BD866A 0%, #89685F 100%) !important;
-    color: #F4ECDC !important; border: none !important; border-radius: 10px !important;
-    font-weight: 700 !important; font-size: 0.875rem !important;
-    padding: 0.55rem 1.3rem !important;
-    box-shadow: 0 4px 14px rgba(189,134,106,0.3) !important;
-    transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s !important;
+.chat-examples {
+    display: flex; flex-wrap: wrap; gap: 0.5rem;
+    margin-bottom: 1rem;
 }
-.stButton button:hover, .stFormSubmitButton button:hover {
-    opacity: 0.9 !important; transform: translateY(-1px) !important;
-    box-shadow: 0 6px 20px rgba(201,168,96,0.35) !important;
-}
-/* Secondary / outline buttons via Streamlit "secondary" kind */
-.stButton button[kind="secondary"] {
-    background: rgba(244,236,220,0.05) !important;
-    color: #D4C4A8 !important;
-    border: 1px solid rgba(244,236,220,0.12) !important;
-    box-shadow: none !important;
-}
-.stButton button[kind="secondary"]:hover {
-    background: rgba(201,168,96,0.1) !important;
-    color: #C9A860 !important;
-    border-color: rgba(201,168,96,0.3) !important;
-    box-shadow: none !important;
-}
-[data-testid="stSidebar"] .stButton button {
-    background: rgba(201,96,96,0.1) !important; color: #C97B7B !important;
-    box-shadow: none !important; border: 1px solid rgba(201,96,96,0.2) !important;
-}
-[data-testid="stSidebar"] .stButton button:hover {
-    background: rgba(201,96,96,0.2) !important;
-    transform: none !important; box-shadow: none !important;
+.chat-empty-state {
+    text-align: center; padding: 2rem 1rem;
+    color: #3a2f28; font-size: 0.875rem;
 }
 
-/* ── Inputs ── */
-.stTextInput label, .stNumberInput label, .stSelectbox label, .stFileUploader label {
-    color: #6B5C50 !important; font-size: 0.75rem !important;
-    font-weight: 700 !important; text-transform: uppercase !important;
-    letter-spacing: 0.09em !important;
+/* ── Prediction rows ── */
+.pred-row {
+    background: #221c18;
+    border: 1px solid rgba(244,236,220,0.07);
+    border-radius: 14px; padding: 1rem 1.25rem;
+    margin-bottom: 0.6rem;
 }
-.stTextInput input, .stNumberInput input {
-    background: #2c2318 !important;
-    border: 1px solid rgba(244,236,220,0.09) !important;
-    border-radius: 10px !important; color: #F4ECDC !important;
+.pred-meta {
+    display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 8px;
 }
-.stTextInput input:focus, .stNumberInput input:focus {
-    border-color: #7AA0C4 !important;
-    box-shadow: 0 0 0 3px rgba(122,160,196,0.18) !important;
+.pred-title { font-weight: 600; color: #F4ECDC; }
+.pred-reason { font-size: 0.78rem; color: #A89880; }
+.pred-numbers { display: flex; gap: 2rem; margin-bottom: 10px; }
+.pred-num-group { }
+.pred-num-label {
+    font-size: 0.68rem; color: #6B5C50; text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 2px;
 }
-div[data-baseweb="select"] > div {
-    background: #2c2318 !important;
-    border: 1px solid rgba(244,236,220,0.09) !important;
-    border-radius: 10px !important; color: #F4ECDC !important;
+.pred-num-value { font-size: 1.05rem; font-weight: 700; color: #C9A860; }
+.pred-bar-wrap {
+    background: rgba(244,236,220,0.06);
+    border-radius: 99px; height: 6px; overflow: hidden;
 }
-
-/* ── File uploader ── */
-[data-testid="stFileUploader"] {
-    background: #221c18 !important;
-    border: 2px dashed rgba(122,160,196,0.3) !important;
-    border-radius: 16px !important; padding: 1rem !important;
-    transition: border-color 0.2s !important;
-}
-[data-testid="stFileUploader"]:hover { border-color: rgba(122,160,196,0.55) !important; }
-
-/* ── DataFrames ── */
-[data-testid="stDataFrame"] {
-    border: 1px solid rgba(244,236,220,0.07) !important;
-    border-radius: 14px !important; overflow: hidden !important;
+.pred-bar-fill {
+    height: 100%; border-radius: 99px; transition: width 0.4s;
 }
 
-/* ── Tabs — sky-blue active ── */
-.stTabs [data-baseweb="tab-list"] {
-    background: #221c18 !important; border-radius: 14px !important;
-    padding: 5px !important; gap: 4px !important;
-    border: 1px solid rgba(244,236,220,0.07) !important;
+/* ── Alert cards ── */
+.alert-card {
+    border-radius: 14px; padding: 1rem 1.1rem; margin-bottom: 0.5rem;
 }
-.stTabs [data-baseweb="tab"] {
-    border-radius: 10px !important; color: #6B5C50 !important;
-    font-weight: 600 !important; padding: 0.45rem 1.2rem !important;
-    font-size: 0.875rem !important;
+.alert-cat {
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; margin-bottom: 6px;
 }
-.stTabs [aria-selected="true"] {
-    background: linear-gradient(135deg, #7AA0C4 0%, #5A80A4 100%) !important;
-    color: #F4ECDC !important; box-shadow: 0 4px 14px rgba(122,160,196,0.35) !important;
-}
-.stTabs [data-baseweb="tab-highlight"],
-.stTabs [data-baseweb="tab-border"] { display: none !important; }
-
-/* ── Expanders ── */
-[data-testid="stExpander"] {
-    background: #221c18 !important;
-    border: 1px solid rgba(244,236,220,0.07) !important;
-    border-radius: 14px !important;
-}
-[data-testid="stExpander"] summary {
-    color: #D4C4A8 !important;
-}
-
-/* ── Dividers ── */
-hr { border-color: rgba(244,236,220,0.07) !important; margin: 1.5rem 0 !important; }
-
-/* ── Chat messages — user warm cream, assistant dark ── */
-[data-testid="stChatMessage"][data-testid*="user"],
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
-    background: rgba(244,236,220,0.05) !important;
-    border: 1px solid rgba(244,236,220,0.1) !important;
-    border-left: 3px solid #C9A860 !important;
-    border-radius: 16px !important; padding: 1rem 1.2rem !important;
-    margin-bottom: 0.6rem !important;
-}
-[data-testid="stChatMessage"] {
-    background: #221c18 !important;
-    border: 1px solid rgba(244,236,220,0.07) !important;
-    border-left: 3px solid #7AA0C4 !important;
-    border-radius: 16px !important; padding: 1rem 1.2rem !important;
-    margin-bottom: 0.6rem !important;
-}
-[data-testid="stChatInputTextArea"] {
-    background: #2c2318 !important;
-    border: 1px solid rgba(122,160,196,0.3) !important;
-    border-radius: 12px !important; color: #F4ECDC !important;
-}
-
-/* ── Alerts — colour-coded ── */
-.stAlert { border-radius: 12px !important; font-size: 0.875rem !important; }
-.stAlert[data-baseweb="notification"][kind="positive"],
-div[data-testid="stAlert"][data-baseweb="notification"] {
-    border-left: 3px solid #7B9E87 !important;
-}
-
-/* ── Caption / small text ── */
-.stCaption, [data-testid="stCaptionContainer"] p {
-    color: #A89880 !important;
-}
-
-/* ── Spinner ── */
-.stSpinner [data-testid="stSpinner"] div,
-div[data-testid="stSpinner"] > div > div { border-top-color: #C9A860 !important; }
-
-/* ── Progress bar ── */
-[data-testid="stProgressBar"] > div > div {
-    background: linear-gradient(90deg, #7B9E87, #C9A860) !important;
-    border-radius: 99px !important;
-}
-
-/* ── Info / success / warning native Streamlit boxes ── */
-div[data-testid="stInfo"]    { border-left: 3px solid #7AA0C4 !important; }
-div[data-testid="stSuccess"] { border-left: 3px solid #7B9E87 !important; }
-div[data-testid="stWarning"] { border-left: 3px solid #C9A860 !important; }
-div[data-testid="stError"]   { border-left: 3px solid #C97B7B !important; }
-
-/* ── Hide dialog native title bar ── */
-[data-testid="stDialog"] h2,
-[data-testid="stDialog"] h1,
-[data-testid="stDialog"] header,
-[data-testid="stDialog"] [data-testid="stDialogTitle"],
-[data-testid="stDialog"] [data-testid="stHeadingWithActionElements"] {
-    display: none !important;
-}
+.alert-msg { font-size: 0.875rem; color: #ede0cc; line-height: 1.5; }
 </style>
 """
 
-st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
-
-# ── Kill sidebar resize handle via JS (CSS alone can't remove drag listeners) ──
-st.markdown(
-    """
-    <script>
-    (function() {
-        function killHandle() {
-            var h = document.querySelector('[data-testid="stSidebarResizeHandle"]');
-            if (h) {
-                h.remove();
-                return true;
-            }
-            return false;
-        }
-        if (!killHandle()) {
-            var obs = new MutationObserver(function(_, o) {
-                if (killHandle()) o.disconnect();
-            });
-            obs.observe(document.documentElement, { childList: true, subtree: true });
-        }
-    })();
-    </script>
-    """,
-    unsafe_allow_html=True,
-)
-
-# ── Full-screen loading overlay ────────────────────────────────────────────────
-_loader = st.empty()
-_loader.markdown(
-    """
-    <style>
-    #fs-loader {
-        position: fixed; inset: 0; background: #1a1512;
-        display: flex; flex-direction: column;
-        align-items: center; justify-content: center;
-        gap: 0.75rem; z-index: 99999;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    }
-    .fsl-icon  { font-size: 3.5rem; animation: fsl-pulse 1.6s ease-in-out infinite; }
-    .fsl-title { color: #F4ECDC; font-size: 2.4rem; font-weight: 900;
-                 letter-spacing: -1px; margin: 0.25rem 0 0; }
-    .fsl-sub   { color: #6B5C50; font-size: 0.85rem; margin: 0 0 1.25rem; }
-    .fsl-ring  {
-        width: 40px; height: 40px;
-        border: 3px solid rgba(201,168,96,0.2);
-        border-top-color: #C9A860; border-radius: 50%;
-        animation: fsl-spin 0.85s linear infinite;
-    }
-    @keyframes fsl-spin  { to { transform: rotate(360deg); } }
-    @keyframes fsl-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
-    </style>
-    <div id="fs-loader">
-        <p class="fsl-title">Expenger</p>
-        <p class="fsl-sub">Loading your workspace…</p>
-        <div class="fsl-ring"></div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-import streamlit.components.v1 as _stc_v1                                          # noqa: E402
-from components.auth import logout, restore_session_from_cookies                   # noqa: E402
-from frontend import budgeting, chat_ai, dashboard, landing                        # noqa: E402
-from backend.supabase_client import (                                              # noqa: E402
-    exchange_code_for_session, set_recovery_session, update_user_password,
-)
-
-_loader.empty()
+EXAMPLE_QUESTIONS = [
+    "Where can I cut back most?",
+    "How much did I spend on food?",
+    "Am I on track with my budget?",
+    "What's my biggest expense this month?",
+]
 
 
-# ─── Session init ─────────────────────────────────────────────────────────────
-
-def _init_session() -> None:
-    for key, val in {
-        "logged_in":    False,
-        "user_id":      None,
-        "user_email":   None,
-        "access_token": None,
-        "show_auth":    False,
-    }.items():
-        if key not in st.session_state:
-            st.session_state[key] = val
+def _score_color(score: int) -> str:
+    if score >= 75: return "#22c55e"
+    if score >= 50: return "#f59e0b"
+    return "#ef4444"
 
 
-# ─── Password reset callback ──────────────────────────────────────────────────
+def _score_label(score: int) -> str:
+    if score >= 80: return "Excellent"
+    if score >= 65: return "Good"
+    if score >= 50: return "Fair"
+    if score >= 30: return "Needs Attention"
+    return "Over Budget"
 
-@st.dialog("Set New Password", width="small")
-def _password_reset_dialog(code: str = "", access_token: str = "", refresh_token: str = "") -> None:
+
+# ── Data loading ──────────────────────────────────────────────────────────────
+
+def _load_data() -> tuple[list[dict], list[dict]]:
+    with st.spinner("Loading your financial data…"):
+        t = fetch_transactions(st.session_state.user_id)
+        b = fetch_budgets(st.session_state.user_id)
+    transactions = t["data"] if not t["error"] else []
+    budgets      = b["data"] if not b["error"] else []
+    st.session_state.transactions = transactions
+    return transactions, budgets
+
+
+# ── Loading state ─────────────────────────────────────────────────────────────
+
+def _show_loading_card() -> None:
     st.markdown(
         """
-        <style>
-        [data-testid="stDialog"] h2 { display: none !important; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        """
-        <div style="text-align:center;padding:0.5rem 0 1.25rem">
-            <span style="font-size:2rem;filter:drop-shadow(0 0 16px rgba(122,160,196,0.6))">🔑</span>
-            <div style="font-size:1.3rem;font-weight:800;
-                        color:#F4ECDC;margin:0.4rem 0 0.15rem;letter-spacing:-0.3px">
-                Set New Password
-            </div>
-            <div style="font-size:0.8rem;color:#A89880">
-                Choose a strong password for your Expenger account
+        <div class="ai-loading-card">
+            <div style="font-size:4rem;margin-bottom:1.25rem;
+                        filter:drop-shadow(0 0 20px rgba(122,160,196,0.5))">🤖</div>
+            <h3 style="color:#F4ECDC;font-size:1.5rem;font-weight:800;
+                       margin-bottom:0.5rem;letter-spacing:-0.3px">
+                Expenger AI is analysing your finances
+            </h3>
+            <p style="color:#A89880;font-size:0.9rem;max-width:420px;
+                      margin:0 auto 1.5rem;line-height:1.6">
+                Reading your transactions, calculating patterns,
+                and generating personalised insights…
+            </p>
+            <div class="ai-loading-steps">
+                <span class="ai-step-chip">📊 Reading transactions</span>
+                <span class="ai-step-chip">🏷️ Analysing categories</span>
+                <span class="ai-step-chip">📈 Calculating trends</span>
+                <span class="ai-step-chip">💡 Generating insights</span>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # Establish a recovery session (run once per dialog open)
-    if not st.session_state.get("_recovery_session_set"):
-        with st.spinner("Verifying reset link…"):
-            if code:
-                # PKCE flow — exchange code for session
-                result = exchange_code_for_session(code)
-                session = result.get("session")
-            else:
-                # Implicit flow — token arrived directly in URL fragment
-                result = set_recovery_session(access_token, refresh_token)
-                session = result.get("session")
-        if result["error"]:
-            st.error(f"Reset link is invalid or expired — {result['error']}")
-            if st.button("Request a new link"):
-                st.query_params.clear()
-                st.rerun(scope="app")
-            return
-        if session:
-            st.session_state.access_token = session.access_token
-        st.session_state._recovery_session_set = True
 
-    with st.form("new_password_form"):
-        pw      = st.text_input("New Password",     placeholder="Min. 6 characters", type="password")
-        confirm = st.text_input("Confirm Password", placeholder="Repeat password",   type="password")
-        st.markdown("<div style='height:0.25rem'></div>", unsafe_allow_html=True)
-        submitted = st.form_submit_button("Update Password →", use_container_width=True)
+# ── Section renderers ─────────────────────────────────────────────────────────
 
-    if submitted:
-        if not pw or not confirm:
-            st.error("Both fields are required.")
-        elif pw != confirm:
-            st.error("Passwords do not match.")
-        elif len(pw) < 6:
-            st.error("Password must be at least 6 characters.")
-        else:
-            with st.spinner("Updating password…"):
-                res = update_user_password(pw)
-            if res["error"]:
-                st.error(f"Could not update password — {res['error']}")
-            else:
-                st.success("✅ Password updated! You can now log in.")
-                st.session_state._recovery_session_set = False
-                st.query_params.clear()
-
-
-def _handle_recovery_params() -> bool:
-    """Check URL for Supabase recovery params. Returns True if recovery flow is active."""
-    params = st.query_params
-
-    # PKCE flow: ?code=...
-    code = params.get("code")
-    if code:
-        _password_reset_dialog(code=code)
-        return True
-
-    # Implicit flow: ?type=recovery&access_token=... (set by JS fragment redirect below)
-    if params.get("type") == "recovery" and params.get("access_token"):
-        _password_reset_dialog(
-            access_token=params["access_token"],
-            refresh_token=params.get("refresh_token", ""),
-        )
-        return True
-
-    return False
-
-
-# ─── Sidebar ──────────────────────────────────────────────────────────────────
-
-# AI Insights first — the highlight feature of Expenger
-PAGES = {
-    "🧠  AI Insights": chat_ai,
-    "📊  Dashboard":   dashboard,
-    "💰  Budgeting":   budgeting,
-}
-
-
-def _render_sidebar() -> str:
-    with st.sidebar:
+def _render_recommendations(recommendations: list[dict]) -> None:
+    if not recommendations:
         st.markdown(
             """
-            <div style="padding:0.5rem 0.5rem 1rem;text-align:center">
-                <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:4px">
-                    <div>
-                        <div style="font-size:1.65rem;font-weight:900;color:#F4ECDC;
-                                    letter-spacing:-0.5px">Expenger</div>
-                        <div style="font-size:0.75rem;color:#6B5C50;font-weight:600;
-                                    text-transform:uppercase;letter-spacing:0.07em">
-                            AI Expense Manager
-                        </div>
-                    </div>
-                </div>
-                <div style="font-size:0.78rem;color:#A89880;margin-top:6px;
-                            word-break:break-all">
-                    {email}
-                </div>
+            <div style="text-align:center;padding:1.5rem;color:#5c4e46;font-size:0.875rem;
+                        background:#221c18;border-radius:14px;border:1px solid rgba(244,236,220,0.06)">
+                🎉 No specific recommendations right now — your spending looks healthy!
             </div>
-            """.format(email=st.session_state.user_email or ""),
+            """,
             unsafe_allow_html=True,
         )
+        return
+
+    for rec in recommendations:
+        savings = float(rec.get("estimated_savings", 0))
+        cat     = rec.get("category", "")
+        title   = rec.get("title", "")
+        detail  = rec.get("detail", "")
+
+        savings_html = (
+            f'<div class="rec-card-savings">'
+            f'<div class="rec-savings-label">Save up to</div>'
+            f'<div class="rec-savings-value">${savings:,.0f}</div>'
+            f'</div>'
+            if savings > 0 else ""
+        )
+
         st.markdown(
-            "<hr style='border-color:rgba(244,236,220,0.06);margin:0 0 0.75rem 0'>",
+            f"""
+            <div class="rec-card">
+                <div class="rec-card-body">
+                    <div class="rec-card-title">💡 {title}</div>
+                    <div class="rec-card-detail">{detail}</div>
+                    <div class="rec-card-cat">{cat}</div>
+                </div>
+                {savings_html}
+            </div>
+            """,
             unsafe_allow_html=True,
         )
-        selected = st.radio("nav", list(PAGES.keys()), label_visibility="collapsed")
-        st.markdown("<div style='min-height:200px'></div>", unsafe_allow_html=True)
+
+
+def _render_health_score(score: int, summary: str) -> None:
+    color = _score_color(score)
+    label = _score_label(score)
+
+    col_score, col_summary = st.columns([1, 3])
+
+    with col_score:
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=score,
+            number={"suffix": "", "font": {"size": 36, "color": color}},
+            gauge={
+                "axis":      {"range": [0, 100], "tickcolor": "#475569", "tickwidth": 1},
+                "bar":       {"color": color, "thickness": 0.25},
+                "bgcolor":   "rgba(0,0,0,0)",
+                "borderwidth": 0,
+                "steps": [
+                    {"range": [0,  30], "color": "rgba(239,68,68,0.15)"},
+                    {"range": [30, 65], "color": "rgba(245,158,11,0.12)"},
+                    {"range": [65,100], "color": "rgba(34,197,94,0.12)"},
+                ],
+            },
+        ))
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#b8a898"),
+            height=200,
+            margin=dict(t=20, b=0, l=20, r=20),
+        )
+        st.plotly_chart(fig, use_container_width=True)
         st.markdown(
-            "<hr style='border-color:rgba(244,236,220,0.06);margin:0 0 0.75rem 0'>",
+            f"<p style='text-align:center;font-size:1rem;font-weight:800;color:{color};"
+            f"margin-top:-12px;letter-spacing:-0.2px'>{label}</p>",
             unsafe_allow_html=True,
         )
-        if st.button("  Log Out", use_container_width=True):
-            logout()
-    return selected  # type: ignore[return-value]
+
+    with col_summary:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div style="background:#221c18;border:1px solid rgba(244,236,220,0.07);
+                        border-left:3px solid {color};border-radius:14px;
+                        padding:1.1rem 1.3rem;">
+                <p style="color:#D4C4A8;font-size:0.95rem;margin:0;line-height:1.6">{summary}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
-# ─── Entry point ──────────────────────────────────────────────────────────────
+def _render_alerts(alerts: list[dict]) -> None:
+    if not alerts:
+        st.markdown(
+            """
+            <div style="text-align:center;padding:1rem;color:#5c4e46;font-size:0.875rem;
+                        background:#221c18;border-radius:14px;border:1px solid rgba(244,236,220,0.06)">
+                ✅ No budget alerts — you're on track across all categories.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
 
-def main() -> None:
-    _init_session()
+    cols = st.columns(min(len(alerts), 3))
+    for i, alert in enumerate(alerts):
+        icon, color, bg = SEVERITY_STYLE.get(alert.get("severity", "low"), SEVERITY_STYLE["low"])
+        with cols[i % 3]:
+            st.markdown(
+                f"""
+                <div class="alert-card" style="background:{bg};border:1px solid {color}33">
+                    <div class="alert-cat" style="color:{color}">{icon} {alert.get('category','')}</div>
+                    <div class="alert-msg">{alert.get('message','')}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-    # Detect Supabase implicit-flow recovery links (#access_token=...&type=recovery).
-    # Streamlit can't read URL fragments — JS reads the hash and redirects to clean query params.
-    _stc_v1.html(
-        """<script>
-        (function() {
-            var hash = window.parent.location.hash.slice(1);
-            if (!hash) return;
-            var p = {};
-            hash.split('&').forEach(function(s) {
-                var i = s.indexOf('=');
-                if (i > 0) p[decodeURIComponent(s.slice(0,i))] = decodeURIComponent(s.slice(i+1));
+
+def _render_predictions(predictions: list[dict]) -> None:
+    if not predictions:
+        st.markdown(
+            """
+            <div style="text-align:center;padding:1rem;color:#5c4e46;font-size:0.875rem;
+                        background:#221c18;border-radius:14px;border:1px solid rgba(244,236,220,0.06)">
+                Not enough data to generate predictions yet.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    for pred in predictions:
+        cat       = pred.get("category", "")
+        spent     = float(pred.get("spent_so_far", 0))
+        predicted = float(pred.get("predicted_monthly_total", 0))
+        budget    = pred.get("budget")
+        exceed    = pred.get("will_exceed", False)
+        reason    = pred.get("reason", "")
+
+        budget_val  = float(budget) if budget else None
+        pct         = min((predicted / budget_val * 100), 100) if budget_val else None
+        bar_color   = "#ef4444" if exceed else "#BD866A"
+        status_icon = "⚠️" if exceed else "✅"
+
+        budget_html = (
+            f'<div class="pred-num-group">'
+            f'<div class="pred-num-label">Budget</div>'
+            f'<div class="pred-num-value" style="color:#A89880">${budget_val:,.2f}</div>'
+            f'</div>'
+            if budget_val else ""
+        )
+        bar_html = (
+            f'<div class="pred-bar-wrap">'
+            f'<div class="pred-bar-fill" style="width:{pct:.1f}%;background:{bar_color}"></div>'
+            f'</div>'
+            if pct is not None else ""
+        )
+
+        st.markdown(
+            f"""
+            <div class="pred-row">
+                <div class="pred-meta">
+                    <span class="pred-title">{status_icon} {cat}</span>
+                    <span class="pred-reason">{reason}</span>
+                </div>
+                <div class="pred-numbers">
+                    <div class="pred-num-group">
+                        <div class="pred-num-label">Spent so far</div>
+                        <div class="pred-num-value">${spent:,.2f}</div>
+                    </div>
+                    <div class="pred-num-group">
+                        <div class="pred-num-label">Predicted total</div>
+                        <div class="pred-num-value" style="color:{'#ef4444' if exceed else '#f59e0b'}">${predicted:,.2f}</div>
+                    </div>
+                    {budget_html}
+                </div>
+                {bar_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# ── Chat section ──────────────────────────────────────────────────────────────
+
+_SCROLL_TO_CHAT_JS = """
+<script>
+setTimeout(function() {
+    try {
+        var el = window.parent.document.querySelector('.chat-section-anchor');
+        if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    } catch(e) {}
+}, 80);
+</script>
+"""
+
+_SCROLL_TO_BOTTOM_JS = """
+<script>
+(function() {
+    function scrollBottom() {
+        try {
+            var p = window.parent;
+            p.scrollTo(0, p.document.body.scrollHeight);
+            ['section.main',
+             '[data-testid="stMainBlockContainer"]',
+             '[data-testid="stAppViewBlockContainer"]',
+             '[data-testid="stMain"]'].forEach(function(s) {
+                var el = p.document.querySelector(s);
+                if (el) el.scrollTop = el.scrollHeight;
             });
-            if (p['type'] === 'recovery' && p['access_token']) {
-                window.parent.location.replace(
-                    '/?type=recovery'
-                    + '&access_token=' + encodeURIComponent(p['access_token'])
-                    + '&refresh_token=' + encodeURIComponent(p['refresh_token'] || '')
-                );
+        } catch(e) {}
+    }
+    setTimeout(scrollBottom, 200);
+    setTimeout(scrollBottom, 500);
+    setTimeout(scrollBottom, 900);
+})();
+</script>
+"""
+
+
+def _render_chat(transactions: list[dict]) -> None:
+    # Invisible anchor — JS scrolls to this when user submits a question
+    st.markdown('<div class="chat-section-anchor"></div>', unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="chat-header">
+            <div class="chat-header-icon">💬</div>
+            <div>
+                <div class="chat-header-title">Ask Expenger AI</div>
+                <div class="chat-header-sub">Ask anything about your spending, budgets, or financial habits</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+
+    # ── Example question chips ────────────────────────────────────────────────
+    if not st.session_state.chat_messages:
+        st.markdown(
+            "<p style='color:#5c4e46;font-size:0.8rem;margin:1rem 0 0.5rem;"
+            "font-weight:600;text-transform:uppercase;letter-spacing:0.08em'>"
+            "Try asking:</p>",
+            unsafe_allow_html=True,
+        )
+        chip_cols = st.columns(len(EXAMPLE_QUESTIONS))
+        for i, q in enumerate(EXAMPLE_QUESTIONS):
+            with chip_cols[i]:
+                if st.button(q, key=f"chip_{i}", use_container_width=True):
+                    st.session_state.chat_prefill = q
+                    st.session_state.scroll_to_chat = True
+                    st.rerun()
+
+    # Handle pre-filled question from chip click
+    prefill_prompt = st.session_state.pop("chat_prefill", None)
+
+    # If a chip was clicked, scroll to chat on this render
+    if st.session_state.pop("scroll_to_chat", False):
+        st.iframe(_SCROLL_TO_CHAT_JS, height=1)
+
+    # Show existing messages
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Chat input — scroll to chat section as soon as user submits
+    prompt = st.chat_input("Ask anything about your spending…") or prefill_prompt
+    if prompt:
+        # Scroll to chat section immediately when user submits
+        st.iframe(_SCROLL_TO_CHAT_JS, height=1)
+
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+                try:
+                    reply = answer_finance_question(
+                        prompt, transactions,
+                        chat_history=st.session_state.chat_messages[:-1],
+                    )
+                except Exception as exc:
+                    reply = f"Error: {exc}"
+            st.markdown(reply)
+        # Scroll to bottom AFTER response renders so user sees the latest reply
+        st.iframe(_SCROLL_TO_BOTTOM_JS, height=1)
+        st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+
+    if st.session_state.chat_messages:
+        if st.button("🗑️ Clear chat history"):
+            st.session_state.chat_messages = []
+            st.rerun()
+
+
+# ── Main render ───────────────────────────────────────────────────────────────
+
+def render() -> None:
+    # Scroll to top on tab switch — called repeatedly to beat Streamlit's lazy render
+    st.iframe(
+        """<script>
+        (function(){
+            function doScroll(){
+                try {
+                    var p = window.parent;
+                    p.scrollTo(0, 0);
+                    p.document.documentElement.scrollTop = 0;
+                    p.document.body.scrollTop = 0;
+                    ['section.main','[data-testid="stMainBlockContainer"]',
+                     '[data-testid="stAppViewBlockContainer"]',
+                     '[data-testid="stMain"]','.main'].forEach(function(s){
+                        var el = p.document.querySelector(s);
+                        if (el) el.scrollTop = 0;
+                    });
+                } catch(e) {}
             }
+            doScroll();
+            setTimeout(doScroll, 150);
+            setTimeout(doScroll, 400);
+            setTimeout(doScroll, 800);
         })();
         </script>""",
         height=1,
     )
 
-    # Handle Supabase password-reset callback (?code=... in URL)
-    if _handle_recovery_params():
-        landing.render()
+    st.markdown(CHAT_CSS, unsafe_allow_html=True)
+
+    # Header row
+    hdr_col, btn_col = st.columns([5, 1])
+    with hdr_col:
+        st.title("🧠 AI Insights")
+        st.caption("Powered by Expenger AI · Personalised analysis of your spending patterns.")
+    with btn_col:
+        st.markdown("<div style='padding-top:1.1rem'>", unsafe_allow_html=True)
+        refresh = st.button("🔄 Refresh", use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    transactions, budgets = _load_data()
+
+    if not transactions:
+        st.markdown(
+            """
+            <div style="text-align:center;padding:4rem 2rem 2rem;background:#221c18;
+                        border:1px solid rgba(244,236,220,0.07);border-radius:20px;margin:1rem 0">
+                <div style="font-size:3rem;margin-bottom:1rem">📂</div>
+                <h3 style="color:#F4ECDC;margin-bottom:0.5rem">No transaction data yet</h3>
+                <p style="color:#A89880;margin-bottom:0">Upload a bank statement from the Dashboard to unlock AI insights.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        # Place button centered below the card
+        _, btn_col, _ = st.columns([1.2, 1.5, 1.2])
+        with btn_col:
+            if st.button("Upload PDF", type="primary", use_container_width=True):
+                st.session_state.nav_page = "📊  Dashboard"
+                st.rerun()
         return
 
-    # Skip cookie auto-login while the auth dialog is open or being triggered.
-    # _auth_open persists across reruns until login succeeds (cleared in auth.py).
-    explicit_auth = (
-        st.query_params.get("show_auth") == "1"
-        or st.session_state.get("_auth_open")
+    cache_key = f"insights_{st.session_state.user_id}"
+
+    if cache_key not in st.session_state or refresh:
+        load_slot = st.empty()
+        with load_slot.container():
+            _show_loading_card()
+        try:
+            generated = generate_spending_insights(transactions, budgets)
+            st.session_state[cache_key] = generated
+        except Exception as exc:
+            load_slot.empty()
+            st.error(f"Could not generate insights: {exc}")
+            return
+        load_slot.empty()
+        # Rerun so the fresh render starts from the top.
+        # Insights are cached — the loading block won't run again.
+        st.rerun()
+
+    insights = st.session_state.get(cache_key)
+    if not insights:
+        return
+
+    # ── Rate-limit banner — show friendly message, still render chat ──────────
+    if insights.get("_rate_limited"):
+        st.markdown(
+            f"""
+            <div style="background:rgba(201,168,96,0.08);border:1px solid rgba(201,168,96,0.25);
+                        border-left:3px solid #C9A860;border-radius:14px;padding:1.1rem 1.3rem;
+                        margin-bottom:1.5rem">
+                <div style="font-weight:700;color:#C9A860;margin-bottom:4px">
+                    ⚠️ Gemini API quota reached
+                </div>
+                <div style="color:#D4C4A8;font-size:0.875rem;line-height:1.6">
+                    {insights["summary"]}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        # Clear cache so next Refresh retries the API
+        st.session_state.pop(cache_key, None)
+        _render_chat(transactions)
+        return
+
+    # ── 1. Recommendations (most actionable — shown first) ────────────────────
+    st.subheader("💡 Recommendations")
+    st.caption("Specific actions based on your actual transaction patterns.")
+    _render_recommendations(insights.get("recommendations", []))
+
+    st.divider()
+
+    # ── 2. Spending Health Score ──────────────────────────────────────────────
+    st.subheader("📊 Spending Health Score")
+    _render_health_score(
+        insights.get("health_score", 50),
+        insights.get("summary", ""),
     )
 
-    if not st.session_state.logged_in and not explicit_auth:
-        restore_session_from_cookies()
+    st.divider()
 
-    if not st.session_state.logged_in:
-        landing.render()  # dialog is triggered from within landing
-        return
+    # ── 3. Budget Alerts ──────────────────────────────────────────────────────
+    st.subheader("⚠️ Budget Alerts")
+    _render_alerts(insights.get("alerts", []))
 
-    # Clear auth flags on successful login
-    st.session_state.show_auth = False
-    st.session_state.auth_mode = None
+    st.divider()
 
-    page = _render_sidebar()
-    PAGES[page].render()
+    # ── 4. End-of-Month Predictions ───────────────────────────────────────────
+    st.subheader("📈 End-of-Month Predictions")
+    st.caption("Based on your spending pace so far this month.")
+    _render_predictions(insights.get("predictions", []))
 
+    st.divider()
 
-if __name__ == "__main__":
-    main()
+    # ── 5. AI Chat ────────────────────────────────────────────────────────────
+    _render_chat(transactions)
