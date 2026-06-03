@@ -335,4 +335,316 @@ def _render_predictions(predictions: list[dict]) -> None:
         st.markdown(
             """
             <div style="text-align:center;padding:1rem;color:#5c4e46;font-size:0.875rem;
-                        background:#
+                        background:#221c18;border-radius:14px;border:1px solid rgba(244,236,220,0.06)">
+                Not enough data to generate predictions yet.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    for pred in predictions:
+        cat       = pred.get("category", "")
+        spent     = float(pred.get("spent_so_far", 0))
+        predicted = float(pred.get("predicted_monthly_total", 0))
+        budget    = pred.get("budget")
+        exceed    = pred.get("will_exceed", False)
+        reason    = pred.get("reason", "")
+
+        budget_val  = float(budget) if budget else None
+        pct         = min((predicted / budget_val * 100), 100) if budget_val else None
+        bar_color   = "#ef4444" if exceed else "#BD866A"
+        status_icon = "⚠️" if exceed else "✅"
+
+        budget_html = (
+            f'<div class="pred-num-group">'
+            f'<div class="pred-num-label">Budget</div>'
+            f'<div class="pred-num-value" style="color:#A89880">${budget_val:,.2f}</div>'
+            f'</div>'
+            if budget_val else ""
+        )
+        bar_html = (
+            f'<div class="pred-bar-wrap">'
+            f'<div class="pred-bar-fill" style="width:{pct:.1f}%;background:{bar_color}"></div>'
+            f'</div>'
+            if pct is not None else ""
+        )
+
+        st.markdown(
+            f"""
+            <div class="pred-row">
+                <div class="pred-meta">
+                    <span class="pred-title">{status_icon} {cat}</span>
+                    <span class="pred-reason">{reason}</span>
+                </div>
+                <div class="pred-numbers">
+                    <div class="pred-num-group">
+                        <div class="pred-num-label">Spent so far</div>
+                        <div class="pred-num-value">${spent:,.2f}</div>
+                    </div>
+                    <div class="pred-num-group">
+                        <div class="pred-num-label">Predicted total</div>
+                        <div class="pred-num-value" style="color:{'#ef4444' if exceed else '#f59e0b'}">${predicted:,.2f}</div>
+                    </div>
+                    {budget_html}
+                </div>
+                {bar_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# ── Chat section ──────────────────────────────────────────────────────────────
+
+_SCROLL_TO_CHAT_JS = """
+<script>
+setTimeout(function() {
+    try {
+        var el = window.parent.document.querySelector('.chat-section-anchor');
+        if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    } catch(e) {}
+}, 80);
+</script>
+"""
+
+_SCROLL_TO_BOTTOM_JS = """
+<script>
+(function() {
+    function scrollBottom() {
+        try {
+            var p = window.parent;
+            p.scrollTo(0, p.document.body.scrollHeight);
+            ['section.main',
+             '[data-testid="stMainBlockContainer"]',
+             '[data-testid="stAppViewBlockContainer"]',
+             '[data-testid="stMain"]'].forEach(function(s) {
+                var el = p.document.querySelector(s);
+                if (el) el.scrollTop = el.scrollHeight;
+            });
+        } catch(e) {}
+    }
+    setTimeout(scrollBottom, 200);
+    setTimeout(scrollBottom, 500);
+    setTimeout(scrollBottom, 900);
+})();
+</script>
+"""
+
+
+def _render_chat(transactions: list[dict]) -> None:
+    # Invisible anchor — JS scrolls to this when user submits a question
+    st.markdown('<div class="chat-section-anchor"></div>', unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="chat-header">
+            <div class="chat-header-icon">💬</div>
+            <div>
+                <div class="chat-header-title">Ask Expenger AI</div>
+                <div class="chat-header-sub">Ask anything about your spending, budgets, or financial habits</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+
+    # ── Example question chips ────────────────────────────────────────────────
+    if not st.session_state.chat_messages:
+        st.markdown(
+            "<p style='color:#5c4e46;font-size:0.8rem;margin:1rem 0 0.5rem;"
+            "font-weight:600;text-transform:uppercase;letter-spacing:0.08em'>"
+            "Try asking:</p>",
+            unsafe_allow_html=True,
+        )
+        chip_cols = st.columns(len(EXAMPLE_QUESTIONS))
+        for i, q in enumerate(EXAMPLE_QUESTIONS):
+            with chip_cols[i]:
+                if st.button(q, key=f"chip_{i}", use_container_width=True):
+                    st.session_state.chat_prefill = q
+                    st.session_state.scroll_to_chat = True
+                    st.rerun()
+
+    # Handle pre-filled question from chip click
+    prefill_prompt = st.session_state.pop("chat_prefill", None)
+
+    # If a chip was clicked, scroll to chat on this render
+    if st.session_state.pop("scroll_to_chat", False):
+        st.iframe(_SCROLL_TO_CHAT_JS, height=1)
+
+    # Show existing messages
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Chat input — scroll to chat section as soon as user submits
+    prompt = st.chat_input("Ask anything about your spending…") or prefill_prompt
+    if prompt:
+        # Scroll to chat section immediately when user submits
+        st.iframe(_SCROLL_TO_CHAT_JS, height=1)
+
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+                try:
+                    reply = answer_finance_question(
+                        prompt, transactions,
+                        chat_history=st.session_state.chat_messages[:-1],
+                    )
+                except Exception as exc:
+                    reply = f"Error: {exc}"
+            st.markdown(reply)
+        # Scroll to bottom AFTER response renders so user sees the latest reply
+        st.iframe(_SCROLL_TO_BOTTOM_JS, height=1)
+        st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+
+    if st.session_state.chat_messages:
+        if st.button("🗑️ Clear chat history"):
+            st.session_state.chat_messages = []
+            st.rerun()
+
+
+# ── Main render ───────────────────────────────────────────────────────────────
+
+def render() -> None:
+    # Scroll to top on tab switch — called repeatedly to beat Streamlit's lazy render
+    st.iframe(
+        """<script>
+        (function(){
+            function doScroll(){
+                try {
+                    var p = window.parent;
+                    p.scrollTo(0, 0);
+                    p.document.documentElement.scrollTop = 0;
+                    p.document.body.scrollTop = 0;
+                    ['section.main','[data-testid="stMainBlockContainer"]',
+                     '[data-testid="stAppViewBlockContainer"]',
+                     '[data-testid="stMain"]','.main'].forEach(function(s){
+                        var el = p.document.querySelector(s);
+                        if (el) el.scrollTop = 0;
+                    });
+                } catch(e) {}
+            }
+            doScroll();
+            setTimeout(doScroll, 150);
+            setTimeout(doScroll, 400);
+            setTimeout(doScroll, 800);
+        })();
+        </script>""",
+        height=1,
+    )
+
+    st.markdown(CHAT_CSS, unsafe_allow_html=True)
+
+    # Header row
+    hdr_col, btn_col = st.columns([5, 1])
+    with hdr_col:
+        st.title("🧠 AI Insights")
+        st.caption("Powered by Expenger AI · Personalised analysis of your spending patterns.")
+    with btn_col:
+        st.markdown("<div style='padding-top:1.1rem'>", unsafe_allow_html=True)
+        refresh = st.button("🔄 Refresh", use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    transactions, budgets = _load_data()
+
+    if not transactions:
+        st.markdown(
+            """
+            <div style="text-align:center;padding:4rem 2rem 2rem;background:#221c18;
+                        border:1px solid rgba(244,236,220,0.07);border-radius:20px;margin:1rem 0">
+                <div style="font-size:3rem;margin-bottom:1rem">📂</div>
+                <h3 style="color:#F4ECDC;margin-bottom:0.5rem">No transaction data yet</h3>
+                <p style="color:#A89880;margin-bottom:0">Upload a bank statement from the Dashboard to unlock AI insights.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        # Place button centered below the card
+        _, btn_col, _ = st.columns([1.2, 1.5, 1.2])
+        with btn_col:
+            def goto_dashboard():
+                st.session_state.nav_page = "📊  Dashboard"
+            st.button("Upload PDF", type="primary", use_container_width=True, on_click=goto_dashboard)
+        return
+
+    cache_key = f"insights_{st.session_state.user_id}"
+
+    if cache_key not in st.session_state or refresh:
+        load_slot = st.empty()
+        with load_slot.container():
+            _show_loading_card()
+        try:
+            generated = generate_spending_insights(transactions, budgets)
+            st.session_state[cache_key] = generated
+        except Exception as exc:
+            load_slot.empty()
+            st.error(f"Could not generate insights: {exc}")
+            return
+        load_slot.empty()
+        # Rerun so the fresh render starts from the top.
+        # Insights are cached — the loading block won't run again.
+        st.rerun()
+
+    insights = st.session_state.get(cache_key)
+    if not insights:
+        return
+
+    # ── Rate-limit banner — show friendly message, still render chat ──────────
+    if insights.get("_rate_limited"):
+        st.markdown(
+            f"""
+            <div style="background:rgba(201,168,96,0.08);border:1px solid rgba(201,168,96,0.25);
+                        border-left:3px solid #C9A860;border-radius:14px;padding:1.1rem 1.3rem;
+                        margin-bottom:1.5rem">
+                <div style="font-weight:700;color:#C9A860;margin-bottom:4px">
+                    ⚠️ Gemini API quota reached
+                </div>
+                <div style="color:#D4C4A8;font-size:0.875rem;line-height:1.6">
+                    {insights["summary"]}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        # Clear cache so next Refresh retries the API
+        st.session_state.pop(cache_key, None)
+        _render_chat(transactions)
+        return
+
+    # ── 1. Recommendations (most actionable — shown first) ────────────────────
+    st.subheader("💡 Recommendations")
+    st.caption("Specific actions based on your actual transaction patterns.")
+    _render_recommendations(insights.get("recommendations", []))
+
+    st.divider()
+
+    # ── 2. Spending Health Score ──────────────────────────────────────────────
+    st.subheader("📊 Spending Health Score")
+    _render_health_score(
+        insights.get("health_score", 50),
+        insights.get("summary", ""),
+    )
+
+    st.divider()
+
+    # ── 3. Budget Alerts ──────────────────────────────────────────────────────
+    st.subheader("⚠️ Budget Alerts")
+    _render_alerts(insights.get("alerts", []))
+
+    st.divider()
+
+    # ── 4. End-of-Month Predictions ───────────────────────────────────────────
+    st.subheader("📈 End-of-Month Predictions")
+    st.caption("Based on your spending pace so far this month.")
+    _render_predictions(insights.get("predictions", []))
+
+    st.divider()
+
+    # ── 5. AI Chat ────────────────────────────────────────────────────────────
+    _render_chat(transactions)
