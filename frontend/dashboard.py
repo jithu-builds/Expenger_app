@@ -17,6 +17,7 @@ from backend.ai_engine import extract_transactions_from_markdown
 from backend.document_parser import parse_pdf_to_markdown
 from backend.supabase_client import (
     delete_transaction,
+    delete_transactions,
     fetch_transactions,
     file_already_imported,
     insert_transactions,
@@ -339,6 +340,27 @@ def _confirm_delete_dialog(txn_id: str, desc: str) -> None:
             st.rerun()
 
 
+# ── Clear all confirmation dialog ─────────────────────────────────────────────
+
+@st.dialog("Clear All Transactions")
+def _confirm_clear_all_dialog() -> None:
+    st.error("🚨 **Warning:** This will permanently delete ALL transactions in your account. This action cannot be undone.")
+    col_yes, col_no = st.columns(2)
+    with col_yes:
+        if st.button("Yes, clear all data", type="primary", use_container_width=True):
+            res = delete_transactions(st.session_state.user_id)
+            if res["error"]:
+                st.error(f"Could not clear: {res['error']}")
+            else:
+                st.session_state.pop("transactions", None)
+                st.session_state.pop("_confirm_clear_all", None)
+                st.rerun()
+    with col_no:
+        if st.button("Cancel", use_container_width=True):
+            st.session_state.pop("_confirm_clear_all", None)
+            st.rerun()
+
+
 # ── Manage transactions section ───────────────────────────────────────────────
 
 def _render_manage_section(df: pd.DataFrame) -> None:
@@ -377,6 +399,8 @@ def _render_manage_section(df: pd.DataFrame) -> None:
         with col_del:
             if st.button("🗑️  Delete", key="btn_del", use_container_width=True):
                 _confirm_delete_dialog(txn_id, str(txn.get("description", "")))
+
+
 
 
 # ── Scroll helper (robust across Streamlit versions) ─────────────────────────
@@ -452,6 +476,9 @@ def render() -> None:
         )
         _confirm_delete_dialog(pending_id, pending_desc)
 
+    if st.session_state.get("_confirm_clear_all", False):
+        _confirm_clear_all_dialog()
+
     # ── Load transactions (always from cache first) ────────────────────────────
     if "transactions" not in st.session_state:
         _load_transactions()
@@ -461,7 +488,6 @@ def render() -> None:
     if not df_full.empty:
         df_full["amount"] = pd.to_numeric(df_full["amount"], errors="coerce").fillna(0)
 
-    # ── Scroll-to-manage (injected on next render after button click) ────────────
     if st.session_state.pop("scroll_to_manage", False):
         st.iframe(
             """<script>
@@ -472,7 +498,7 @@ def render() -> None:
                 } catch(e) {}
             }, 250);
             </script>""",
-            height=0,
+            height=1,
         )
 
     # ── Header row ─────────────────────────────────────────────────────────────
@@ -618,7 +644,22 @@ def render() -> None:
             _render_manage_section(df_full)
         st.divider()
 
-    st.subheader("All Transactions")
+    col_lbl, col_clear = st.columns([3.8, 1.8])
+    with col_lbl:
+        st.subheader("All Transactions")
+    with col_clear:
+        st.markdown("<div style='padding-top:0.3rem'>", unsafe_allow_html=True)
+        if st.button(
+            "🗑️ Clear All Transactions",
+            key="btn_clear_all_table",
+            use_container_width=True,
+            disabled=df_full.empty,
+            help="Wipe out all transaction records",
+        ):
+            st.session_state["_confirm_clear_all"] = True
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
     display_cols = [c for c in ["date", "description", "amount", "category", "source_file"]
                     if c in df.columns]
     st.dataframe(

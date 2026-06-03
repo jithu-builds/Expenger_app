@@ -35,6 +35,7 @@ CREATE POLICY "Users see own budgets"
 """
 
 import os
+from functools import wraps
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -155,8 +156,32 @@ def update_user_password(new_password: str) -> dict:
         return {"error": str(exc)}
 
 
+# ─── DB Query Decorator ───────────────────────────────────────────────────────
+
+def _db_query(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:
+            msg = str(exc)
+            if "JWT expired" in msg or "PGRST303" in msg:
+                try:
+                    import streamlit as st
+                    from components.auth import logout
+                    st.toast("⚠️ Your session has expired. Logging you out...", icon="🔒")
+                    import time
+                    time.sleep(2)
+                    logout()
+                except Exception:
+                    pass
+            return {"data": [], "error": msg}
+    return wrapper
+
+
 # ─── Transactions ─────────────────────────────────────────────────────────────
 
+@_db_query
 def insert_transactions(user_id: str, transactions: list[dict], source_file: str = "") -> dict:
     if not transactions:
         return {"data": [], "error": None}
@@ -171,31 +196,26 @@ def insert_transactions(user_id: str, transactions: list[dict], source_file: str
         }
         for t in transactions
     ]
-    try:
-        result = (
-            get_client()
-            .table("transactions")
-            .upsert(rows, on_conflict="user_id,date,description,amount")
-            .execute()
-        )
-        return {"data": result.data, "error": None}
-    except Exception as exc:
-        return {"data": [], "error": str(exc)}
+    result = (
+        get_client()
+        .table("transactions")
+        .upsert(rows, on_conflict="user_id,date,description,amount")
+        .execute()
+    )
+    return {"data": result.data, "error": None}
 
 
+@_db_query
 def fetch_transactions(user_id: str) -> dict:
-    try:
-        result = (
-            get_client()
-            .table("transactions")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("date", desc=True)
-            .execute()
-        )
-        return {"data": result.data, "error": None}
-    except Exception as exc:
-        return {"data": [], "error": str(exc)}
+    result = (
+        get_client()
+        .table("transactions")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("date", desc=True)
+        .execute()
+    )
+    return {"data": result.data, "error": None}
 
 
 def file_already_imported(user_id: str, filename: str) -> bool:
@@ -211,83 +231,98 @@ def file_already_imported(user_id: str, filename: str) -> bool:
             .execute()
         )
         return len(result.data) > 0
-    except Exception:
+    except Exception as exc:
+        msg = str(exc)
+        if "JWT expired" in msg or "PGRST303" in msg:
+            try:
+                import streamlit as st
+                from components.auth import logout
+                st.toast("⚠️ Your session has expired. Logging you out...", icon="🔒")
+                import time
+                time.sleep(2)
+                logout()
+            except Exception:
+                pass
         return False
 
 
+@_db_query
 def delete_transactions(user_id: str) -> dict:
-    try:
-        result = (
-            get_client()
-            .table("transactions")
-            .delete()
-            .eq("user_id", user_id)
-            .execute()
-        )
-        return {"data": result.data, "error": None}
-    except Exception as exc:
-        return {"data": [], "error": str(exc)}
+    result = (
+        get_client()
+        .table("transactions")
+        .delete()
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return {"data": result.data, "error": None}
 
 
+@_db_query
 def delete_transaction(user_id: str, transaction_id: str) -> dict:
     """Delete a single transaction by UUID."""
-    try:
-        result = (
-            get_client()
-            .table("transactions")
-            .delete()
-            .eq("user_id", user_id)
-            .eq("id", transaction_id)
-            .execute()
-        )
-        return {"data": result.data, "error": None}
-    except Exception as exc:
-        return {"data": [], "error": str(exc)}
+    result = (
+        get_client()
+        .table("transactions")
+        .delete()
+        .eq("user_id", user_id)
+        .eq("id", transaction_id)
+        .execute()
+    )
+    return {"data": result.data, "error": None}
 
 
+@_db_query
 def update_transaction(user_id: str, transaction_id: str, updates: dict) -> dict:
     """Update editable fields (date, description, amount, category) of one transaction."""
-    try:
-        result = (
-            get_client()
-            .table("transactions")
-            .update(updates)
-            .eq("user_id", user_id)
-            .eq("id", transaction_id)
-            .execute()
-        )
-        return {"data": result.data, "error": None}
-    except Exception as exc:
-        return {"data": [], "error": str(exc)}
+    result = (
+        get_client()
+        .table("transactions")
+        .update(updates)
+        .eq("user_id", user_id)
+        .eq("id", transaction_id)
+        .execute()
+    )
+    return {"data": result.data, "error": None}
 
 
 # ─── Budgets ──────────────────────────────────────────────────────────────────
 
+@_db_query
 def upsert_budget(user_id: str, category: str, monthly_limit: float) -> dict:
-    try:
-        result = (
-            get_client()
-            .table("budgets")
-            .upsert(
-                {"user_id": user_id, "category": category, "monthly_limit": monthly_limit},
-                on_conflict="user_id,category",
-            )
-            .execute()
+    result = (
+        get_client()
+        .table("budgets")
+        .upsert(
+            {"user_id": user_id, "category": category, "monthly_limit": monthly_limit},
+            on_conflict="user_id,category",
         )
-        return {"data": result.data, "error": None}
-    except Exception as exc:
-        return {"data": [], "error": str(exc)}
+        .execute()
+    )
+    return {"data": result.data, "error": None}
 
 
+@_db_query
 def fetch_budgets(user_id: str) -> dict:
-    try:
-        result = (
-            get_client()
-            .table("budgets")
-            .select("*")
-            .eq("user_id", user_id)
-            .execute()
-        )
-        return {"data": result.data, "error": None}
-    except Exception as exc:
-        return {"data": [], "error": str(exc)}
+    result = (
+        get_client()
+        .table("budgets")
+        .select("*")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return {"data": result.data, "error": None}
+
+
+@_db_query
+def delete_budget(user_id: str, category: str) -> dict:
+    result = (
+        get_client()
+        .table("budgets")
+        .delete()
+        .eq("user_id", user_id)
+        .eq("category", category)
+        .execute()
+    )
+    return {"data": result.data, "error": None}
+

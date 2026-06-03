@@ -452,6 +452,11 @@ def _render_chat(transactions: list[dict]) -> None:
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
 
+    # Callback for chip click
+    def handle_chip_click(question: str):
+        st.session_state.chat_messages.append({"role": "user", "content": question})
+        st.session_state.scroll_to_chat = True
+
     # ── Example question chips ────────────────────────────────────────────────
     if not st.session_state.chat_messages:
         st.markdown(
@@ -463,13 +468,13 @@ def _render_chat(transactions: list[dict]) -> None:
         chip_cols = st.columns(len(EXAMPLE_QUESTIONS))
         for i, q in enumerate(EXAMPLE_QUESTIONS):
             with chip_cols[i]:
-                if st.button(q, key=f"chip_{i}", use_container_width=True):
-                    st.session_state.chat_prefill = q
-                    st.session_state.scroll_to_chat = True
-                    st.rerun()
-
-    # Handle pre-filled question from chip click
-    prefill_prompt = st.session_state.pop("chat_prefill", None)
+                st.button(
+                    q,
+                    key=f"chip_{i}",
+                    use_container_width=True,
+                    on_click=handle_chip_click,
+                    args=(q,),
+                )
 
     # If a chip was clicked, scroll to chat on this render
     if st.session_state.pop("scroll_to_chat", False):
@@ -480,21 +485,29 @@ def _render_chat(transactions: list[dict]) -> None:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Chat input — scroll to chat section as soon as user submits
-    prompt = st.chat_input("Ask anything about your spending…") or prefill_prompt
-    if prompt:
-        # Scroll to chat section immediately when user submits
-        st.iframe(_SCROLL_TO_CHAT_JS, height=1)
+    # Chat input
+    prompt = st.chat_input("Ask anything about your spending…")
 
+    # Check if we have a new question to answer
+    new_user_message = None
+    if prompt:
+        new_user_message = prompt
         st.session_state.chat_messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
+    elif st.session_state.chat_messages and st.session_state.chat_messages[-1]["role"] == "user":
+        new_user_message = st.session_state.chat_messages[-1]["content"]
+
+    if new_user_message:
+        # Scroll to chat section immediately when user submits
+        st.iframe(_SCROLL_TO_CHAT_JS, height=1)
+
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
                 try:
                     reply = answer_finance_question(
-                        prompt, transactions,
-                        chat_history=st.session_state.chat_messages[:-1],
+                        new_user_message, transactions,
+                        chat_history=st.session_state.chat_messages[:-1] if prompt else st.session_state.chat_messages[:-2],
                     )
                 except Exception as exc:
                     reply = f"Error: {exc}"
@@ -603,7 +616,7 @@ def render() -> None:
                         border-left:3px solid #C9A860;border-radius:14px;padding:1.1rem 1.3rem;
                         margin-bottom:1.5rem">
                 <div style="font-weight:700;color:#C9A860;margin-bottom:4px">
-                    ⚠️ Gemini API quota reached
+                    ⚠️ Groq API quota reached
                 </div>
                 <div style="color:#D4C4A8;font-size:0.875rem;line-height:1.6">
                     {insights["summary"]}

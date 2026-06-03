@@ -9,7 +9,7 @@ import streamlit as st
 
 
 from backend.ai_engine import suggest_budgets
-from backend.supabase_client import fetch_budgets, fetch_transactions, upsert_budget
+from backend.supabase_client import delete_budget, fetch_budgets, fetch_transactions, upsert_budget
 
 CATEGORIES = [
     "Food & Dining", "Transport", "Shopping", "Entertainment",
@@ -134,6 +134,7 @@ def render() -> None:
         use_container_width=False,
     ):
         st.session_state.show_budget_form = not st.session_state.show_budget_form
+        st.session_state.pop("reset_inputs_to_zero", None)
         st.rerun()
 
     if st.session_state.show_budget_form:
@@ -147,13 +148,21 @@ def render() -> None:
         )
         ai_suggestions = st.session_state.get("ai_budget_suggestions", {})
 
+        # Action row above the form
+        col_actions, _ = st.columns([1.5, 3.5])
+        with col_actions:
+            if st.button("🧹 Reset All Inputs to Zero", key="btn_reset_zero", use_container_width=True):
+                st.session_state["reset_inputs_to_zero"] = True
+                st.rerun()
+
         with st.form("budget_form"):
             st.markdown("Set a **monthly limit** per category. AI suggestions are pre-filled if available.")
             cols = st.columns(3)
             inputs: dict[str, float] = {}
 
+            reset_all = st.session_state.get("reset_inputs_to_zero", False)
             for idx, cat in enumerate(CATEGORIES):
-                default = existing_limits.get(cat) or ai_suggestions.get(cat) or 0.0
+                default = 0.0 if reset_all else (existing_limits.get(cat) or ai_suggestions.get(cat) or 0.0)
                 with cols[idx % 3]:
                     inputs[cat] = st.number_input(
                         cat, min_value=0.0, value=float(default),
@@ -165,11 +174,17 @@ def render() -> None:
         st.markdown("</div></div>", unsafe_allow_html=True)
 
         if submitted:
+            st.session_state.pop("reset_inputs_to_zero", None)
             errors = []
             with st.spinner("Saving budgets…"):
                 for cat, limit in inputs.items():
                     if limit > 0:
                         res = upsert_budget(st.session_state.user_id, cat, limit)
+                        if res["error"]:
+                            errors.append(f"{cat}: {res['error']}")
+                    elif cat in existing_limits:
+                        # User set an existing budget to 0 -> remove it from db
+                        res = delete_budget(st.session_state.user_id, cat)
                         if res["error"]:
                             errors.append(f"{cat}: {res['error']}")
             if errors:
