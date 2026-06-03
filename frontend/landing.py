@@ -864,7 +864,7 @@ def render() -> None:
                 <p class="lp-feat-p">
                     Ask Expenger anything about your money. "Where did I overspend last month?"
                     "How much did I spend on food vs transport?" Get intelligent, specific answers
-                    powered by Google Gemini — not generic tips.
+                    powered by Groq AI — not generic tips.
                 </p>
                 <ul class="lp-feat-bullets">
                     <li>Chat with your financial data in plain English</li>
@@ -1006,7 +1006,7 @@ def render() -> None:
         '<span class="lp-trusted-label">Trusted security from</span>'
         '<span class="lp-trusted-item">🔐 Supabase Auth</span>'
         '<span class="lp-trusted-item">🛡️ Row-Level Security</span>'
-        '<span class="lp-trusted-item">🤖 Google Gemini AI</span>'
+        '<span class="lp-trusted-item">🤖 Groq AI</span>'
         '<span class="lp-trusted-item">📄 Reducto PDF Engine</span>'
         '<span class="lp-trusted-item">🔒 256-bit Encryption</span>'
         '</div>'

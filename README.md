@@ -1,6 +1,6 @@
-# 💡 FinSight — AI Personal Finance Tracker
+# 💡 Expenger — AI Personal Finance Tracker
 
-FinSight is an AI-powered personal finance tracker that reads your bank statements, categorises your spending, tracks your budgets, and gives you intelligent insights — all in one place.
+Expenger is an AI-powered personal finance tracker that reads your bank statements, categorises your spending, tracks your budgets, and gives you intelligent insights — all in one place.
 
 ---
 
@@ -8,11 +8,11 @@ FinSight is an AI-powered personal finance tracker that reads your bank statemen
 
 | Feature | Description |
 |---|---|
-| **PDF Import** | Upload your bank statement PDF and FinSight extracts every transaction automatically |
-| **AI Categorisation** | FinSight AI reads the transactions and assigns categories like Food, Transport, Shopping |
+| **PDF Import** | Upload your bank statement PDF and Expenger extracts every transaction automatically |
+| **AI Categorisation** | Expenger AI reads the transactions and assigns categories like Food, Transport, Shopping |
 | **Dashboard** | Visual breakdown of your spending with pie charts, bar charts, and monthly trends |
 | **Budget Tracker** | Set monthly limits per category and see how your actual spending compares |
-| **AI Budget Suggestions** | FinSight AI analyses your history and suggests realistic budget limits for you |
+| **AI Budget Suggestions** | Expenger AI analyses your history and suggests realistic budget limits for you |
 | **AI Insights** | Get a spending health score, end-of-month predictions, and specific recommendations like "Skip the cinema this weekend — you've already spent $45 on entertainment" |
 | **Secure Auth** | Login and signup powered by Supabase — your data is isolated to your account only |
 
@@ -23,7 +23,7 @@ FinSight is an AI-powered personal finance tracker that reads your bank statemen
 - **Frontend** — [Streamlit](https://streamlit.io)
 - **Database & Auth** — [Supabase](https://supabase.com)
 - **PDF Parsing** — [Reducto API](https://reducto.ai)
-- **AI** — [Google Gemini](https://ai.google.dev) (branded as FinSight AI)
+- **AI** — [Groq](https://groq.com) (branded as Expenger AI)
 - **Language** — Python 3.9+
 
 ---
@@ -47,7 +47,7 @@ FinSight is an AI-powered personal finance tracker that reads your bank statemen
 ├── backend/
 │   ├── supabase_client.py        # All database and auth queries
 │   ├── document_parser.py        # Reducto API — PDF to Markdown
-│   └── ai_engine.py              # Gemini — transaction extraction and insights
+│   └── ai_engine.py              # Groq — transaction extraction and insights
 │
 └── .streamlit/
     └── config.toml               # App theme configuration
@@ -77,14 +77,14 @@ Fill in the `.env` file in the project root:
 ```
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-anon-key
-GEMINI_API_KEY=your-gemini-api-key
+GROQ_API_KEY=your-groq-api-key
 REDUCTO_API_KEY=your-reducto-api-key
 ```
 
 | Key | Where to get it |
 |---|---|
 | `SUPABASE_URL` / `SUPABASE_KEY` | [supabase.com](https://supabase.com) → your project → Settings → API |
-| `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) → Get API Key |
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com/keys) → Get API Key |
 | `REDUCTO_API_KEY` | [reducto.ai](https://reducto.ai) → Dashboard |
 
 ### 4. Set up the Supabase database
@@ -164,7 +164,7 @@ Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 1. **Sign up** with your email and password
 2. Go to **Dashboard** and upload a PDF bank statement
-3. FinSight will extract and categorise all transactions automatically
+3. Expenger will extract and categorise all transactions automatically
 4. Go to **Budgeting** → click **Get AI Budget Suggestions** to set limits
 5. Go to **AI Insights** to see your spending health score, predictions, and recommendations
 
