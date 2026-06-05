@@ -364,12 +364,17 @@ _loader.markdown(
     unsafe_allow_html=True,
 )
 
-import streamlit.components.v1 as _stc_v1
-from components.auth import logout, restore_session_from_cookies
-from frontend import budgeting, chat_ai, dashboard, landing
-from backend.supabase_client import (
-    exchange_code_for_session, set_recovery_session, update_user_password,
-)
+try:
+    import streamlit.components.v1 as _stc_v1
+    from components.auth import logout, restore_session_from_cookies
+    from frontend import budgeting, chat_ai, dashboard, landing
+    from backend.supabase_client import (
+        exchange_code_for_session, set_recovery_session, update_user_password,
+    )
+except Exception as e:
+    _loader.empty()
+    st.error(f"Error loading dependencies: {e}")
+    st.stop()
 
 _loader.empty()
 
