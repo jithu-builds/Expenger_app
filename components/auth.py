@@ -354,6 +354,7 @@ def show_auth_dialog() -> None:
         with st.form("signup_form"):
             email   = st.text_input("Email",            placeholder="you@example.com",   key="su_email")
             pw      = st.text_input("Password",         placeholder="Min. 6 characters", type="password", key="su_pass")
+            st.caption("🔒 Password must contain at least 6 characters, including: lowercase, uppercase, numbers, and special characters (e.g. !@#$).")
             confirm = st.text_input("Confirm Password", placeholder="Repeat password",   type="password", key="su_confirm")
             st.markdown("<div style='height:0.25rem'></div>", unsafe_allow_html=True)
             submitted = st.form_submit_button("Create Account →", use_container_width=True)

@@ -96,6 +96,9 @@ def sign_up(email: str, password: str) -> dict:
             "password": password,
             "options": {"email_redirect_to": APP_URL},
         })
+        user = response.user
+        if user and (user.identities is None or len(user.identities) == 0):
+            return {"user": None, "session": None, "error": "User already registered"}
         return {"user": response.user, "session": response.session, "error": None}
     except Exception as exc:
         return {"user": None, "session": None, "error": str(exc)}
